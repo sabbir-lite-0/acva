@@ -12,7 +12,7 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/my-username/acva/utils"
+	"github.com/sabbir-lite-0/acva/utils"
 )
 
 type Analyzer struct {
