@@ -10,9 +10,9 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/my-username/acva/core"
-	"github.com/my-username/acva/core/gemini"
-	"github.com/my-username/acva/utils"
+	"github.com/sabbir-lite-0/acva/core"
+	"github.com/sabbir-lite-0/acva/core/gemini"
+	"github.com/sabbir-lite-0/acva/utils"
 	"github.com/urfave/cli/v2"
 )
 
@@ -50,8 +50,8 @@ func main() {
 		Compiled: time.Now(),
 		Authors: []*cli.Author{
 			{
-				Name:  "ACVA Team",
-				Email: "acva@example.com",
+				Name:  "DSAS",
+				Email: "test@example.com",
 			},
 		},
 		Flags: []cli.Flag{
