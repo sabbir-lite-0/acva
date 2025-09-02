@@ -24,7 +24,26 @@ jobs:
       with:
         go-version: '1.21'
 
+    - name: Install dependencies
+      run: go mod download
+
+    - name: Build ACVA
+      run: go build -o acva cmd/acva/main.go
+
     - name: Run security scan with AI analysis
       run: |
-        go run cmd/acva/main.go --target https://example.com --module all \
-        --format json --output security-reports/ --features
+        # Create necessary directories
+        mkdir -p reports
+        
+        # Run the scan
+        ./acva --target https://example.com --module all \
+          --format json --output reports/ --features all
+        
+        # Upload reports as artifact
+        echo "Scan completed. Reports generated."
+
+    - name: Upload security reports
+      uses: actions/upload-artifact@v3
+      with:
+        name: security-reports
+        path: reports/
