@@ -1,0 +1,168 @@
+# ACVA Configuration File
+version: 1.0.0
+
+scan:
+  depth: 3
+  max_pages: 1000
+  timeout: 30
+  user_agent: "ACVA/2.0 (Advanced Cybersecurity Vulnerability Assessment)"
+  concurrent_requests: 10
+  delay: 100
+  retries: 3
+  proxy: ""
+  follow_redirects: true
+  rate_limit: 10
+  max_retries: 3
+  backoff_delay: 1000
+  custom_headers:
+    Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+    Accept-Language: "en-US,en;q=0.5"
+    Accept-Encoding: "gzip, deflate"
+  custom_cookies:
+    session: "test"
+  auth:
+    username: ""
+    password: ""
+    type: "basic"
+
+fuzzing:
+  wordlists:
+    - "wordlists/common.txt"
+    - "wordlists/parameters.txt"
+    - "wordlists/directories.txt"
+  payloads:
+    - "'"
+    - "\""
+    - "<script>alert(1)</script>"
+    - "${7*7}"
+    - "{{7*7}}"
+    - "../../../etc/passwd"
+    - "<!--#exec cmd=\"id\"-->"
+
+vulnerabilities:
+  sql_injection: true
+  xss: true
+  csrf: true
+  path_traversal: true
+  sensitive_files: true
+  jwt_security: true
+  ssrf: true
+  command_injection: true
+  insecure_direct_object_reference: true
+  open_redirect: true
+  xxe: true
+  insecure_deserialization: true
+  security_misconfiguration: true
+  graphql_injection: true
+  websocket_vulnerabilities: true
+  prototype_pollution: true
+  cloud_misconfigurations: true
+  subdomain_takeover: true
+
+javascript:
+  enable: true
+  timeout: 30
+  headless: true
+  user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+  wait_for: 5
+  viewport_width: 1280
+  viewport_height: 800
+  execute_scripts: true
+  intercept_requests: true
+
+python:
+  enable: false
+  sqlmap_path: "/usr/bin/sqlmap"
+  xsser_path: "/usr/bin/xsser"
+  nuclei_path: "/usr/bin/nuclei"
+  nikto_path: "/usr/bin/nikto"
+
+reporting:
+  formats:
+    - "html"
+    - "json"
+    - "markdown"
+  output_dir: "reports"
+  include_request_response: true
+  risk_level: "medium"
+  detailed: true
+  executive_summary: true
+  remediation_guidance: true
+
+advanced:
+  ssrf_probe_url: "https://webhook.site/<your-uuid>"
+  bypass_waf: true
+  techniques:
+    - "rotate_user_agent"
+    - "request_jitter"
+    - "ip_rotation"
+    - "url_obfuscation"
+    - "parameter_shuffling"
+
+compliance:
+  frameworks:
+    - "owasp_top_10"
+    - "nist_800_53"
+    - "pci_dss"
+    - "hipaa"
+  generate_reports: true
+  enable_gdpr_check: true
+  enable_hipaa_check: false
+  enable_pci_dss_check: true
+
+safety:
+  max_scan_duration: 3600
+  blacklisted_ips:
+    - "127.0.0.1"
+    - "192.168.0.0/16"
+    - "10.0.0.0/8"
+    - "172.16.0.0/12"
+  whitelisted_domains:
+    - "example.com"
+
+logging:
+  level: "info"
+  file_path: "logs/acva.log"
+  max_size: 10
+  max_backups: 5
+  max_age: 30
+
+api:
+  enabled: false
+  host: "127.0.0.1"
+  port: 8080
+  auth_key: ""
+  rate_limit: 100
+
+cluster:
+  enabled: false
+  mode: "master"
+  redis_url: "redis://127.0.0.1:6379"
+  workers: 5
+
+notifications:
+  email:
+    enabled: false
+    smtp_host: ""
+    smtp_port: 587
+    smtp_user: ""
+    smtp_pass: ""
+    from: ""
+    to: ""
+  slack:
+    enabled: false
+    webhook_url: ""
+  webhook:
+    enabled: false
+    url: ""
+
+# Gemini configuration section
+gemini:
+  enabled: true
+  model: "gemini-pro"
+  api_keys: 
+    - ${GEMINI_API_KEY_1}
+    - ${GEMINI_API_KEY_2}
+    - ${GEMINI_API_KEY_3}
+    - ${GEMINI_API_KEY_4}
+    - ${GEMINI_API_KEY_5}
