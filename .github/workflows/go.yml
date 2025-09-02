@@ -10,6 +10,13 @@ jobs:
   test:
     name: Test and Lint
     runs-on: ubuntu-latest
+    env:
+      GEMINI_API_KEY_1: ${{ secrets.GEMINI_API_KEY_1 }}
+      GEMINI_API_KEY_2: ${{ secrets.GEMINI_API_KEY_2 }}
+      GEMINI_API_KEY_3: ${{ secrets.GEMINI_API_KEY_3 }}
+      GEMINI_API_KEY_4: ${{ secrets.GEMINI_API_KEY_4 }}
+      GEMINI_API_KEY_5: ${{ secrets.GEMINI_API_KEY_5 }}
+    
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
@@ -18,14 +25,38 @@ jobs:
       uses: actions/setup-go@v4
       with:
         go-version: '1.21'
+
+    - name: Download dependencies
+      run: go mod download
 
     - name: Run tests
-      run: go test -v -race ./...
+      run: go test -v -race -coverprofile=coverage.out ./...
 
-  release:
-    name: Create Release
-    runs-on: ubuntu-latest
+    - name: Run security scan
+      run: |
+        go install github.com/securego/gosec/v2/cmd/gosec@latest
+        gosec -exclude-dir=test ./...
+
+    - name: Upload coverage reports
+      uses: codecov/codecov-action@v3
+      with:
+        file: ./coverage.out
+
+  build:
+    name: Build Binaries
     needs: test
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        include:
+          - os: ubuntu-latest
+            name: linux-amd64
+          - os: macos-latest
+            name: darwin-amd64
+          - os: windows-latest
+            name: windows-amd64
+    
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
@@ -35,11 +66,15 @@ jobs:
       with:
         go-version: '1.21'
 
-    - name: Build binary
-      run: go build -o acva cmd/acva/main.go
+    - name: Build
+      run: |
+        mkdir -p dist
+        GOOS=${{ matrix.os == 'windows-latest' && 'windows' || matrix.os == 'macos-latest' && 'darwin' || 'linux' }} \
+        GOARCH=amd64 \
+        go build -ldflags="-s -w -X main.Version=${GITHUB_REF#refs/tags/}" -o dist/acva-${{ matrix.name }} ./cmd/acva
 
-    - name: Upload binary artifact
+    - name: Upload artifacts
       uses: actions/upload-artifact@v3
       with:
-        name: acva-binary
-        path: acva
+        name: acva-${{ matrix.name }}
+        path: dist/*
