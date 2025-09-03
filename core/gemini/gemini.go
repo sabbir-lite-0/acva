@@ -21,6 +21,7 @@ type GeminiClient struct {
 	keyMutex   sync.Mutex
 	usageCount map[string]int
 	maxRetries int
+	rateLimit  time.Duration
 }
 
 type GeminiRequest struct {
@@ -67,9 +68,18 @@ func NewGeminiClient(apiKeys []string, model string, logger *utils.Logger) *Gemi
 		model:      model,
 		baseURL:    "https://generativelanguage.googleapis.com/v1beta/models/",
 		logger:     logger,
-		httpClient: &http.Client{Timeout: 30 * time.Second},
+		httpClient: &http.Client{
+			Timeout: 30 * time.Second,
+			Transport: &http.Transport{
+				MaxIdleConns:        10,
+				IdleConnTimeout:     30 * time.Second,
+				DisableKeepAlives:   false,
+				TLSHandshakeTimeout: 10 * time.Second,
+			},
+		},
 		usageCount: usageCount,
-		maxRetries: len(apiKeys) * 2, // Allow retrying with each key twice
+		maxRetries: len(apiKeys) * 3,
+		rateLimit:  100 * time.Millisecond, // 10 requests per second
 	}
 }
 
@@ -102,7 +112,7 @@ func (g *GeminiClient) GenerateAdvancedPayloads(vulnType, context string) ([]str
 	prompt := fmt.Sprintf(`Generate advanced exploitation payloads for %s vulnerability. 
 	Context: %s
 	Consider WAF bypass techniques, obfuscation, and modern exploitation methods.
-	Return only a JSON array of payload strings.`, vulnType, context)
+	Return only a JSON array of payload strings without any additional text.`, vulnType, context)
 
 	response, err := g.makeRequestWithRetry(prompt)
 	if err != nil {
@@ -112,12 +122,17 @@ func (g *GeminiClient) GenerateAdvancedPayloads(vulnType, context string) ([]str
 	var payloads []string
 	for _, candidate := range response.Candidates {
 		for _, part := range candidate.Content.Parts {
-			// Parse the JSON array from the response
-			if strings.HasPrefix(part.Text, "[") && strings.HasSuffix(part.Text, "]") {
-				err := json.Unmarshal([]byte(part.Text), &payloads)
+			// Clean the response and extract JSON
+			cleanText := strings.TrimSpace(part.Text)
+			cleanText = strings.TrimPrefix(cleanText, "```json")
+			cleanText = strings.TrimSuffix(cleanText, "```")
+			cleanText = strings.TrimSpace(cleanText)
+			
+			if strings.HasPrefix(cleanText, "[") && strings.HasSuffix(cleanText, "]") {
+				err := json.Unmarshal([]byte(cleanText), &payloads)
 				if err != nil {
 					g.logger.Error("Failed to parse Gemini response: %v", err)
-					return nil, err
+					continue
 				}
 				return payloads, nil
 			}
@@ -129,15 +144,20 @@ func (g *GeminiClient) GenerateAdvancedPayloads(vulnType, context string) ([]str
 
 func (g *GeminiClient) AnalyzeResponse(responseText, payload, vulnType string) (bool, string, error) {
 	// Truncate very long responses to avoid token limits
-	if len(responseText) > 10000 {
-		responseText = responseText[:10000] + "...(truncated)"
+	if len(responseText) > 8000 {
+		responseText = responseText[:8000] + "...(truncated)"
 	}
 
 	prompt := fmt.Sprintf(`Analyze this web response for %s vulnerability. 
 	Payload used: %s
 	Response: %s
-	Return JSON with {confirmed: boolean, confidence: string, reason: string}`, 
-	vulnType, payload, responseText)
+	
+	Return JSON with this exact structure:
+	{
+		"confirmed": boolean,
+		"confidence": "high/medium/low",
+		"reason": "string explaining why"
+	}`, vulnType, payload, responseText)
 
 	geminiResponse, err := g.makeRequestWithRetry(prompt)
 	if err != nil {
@@ -146,14 +166,23 @@ func (g *GeminiClient) AnalyzeResponse(responseText, payload, vulnType string) (
 
 	for _, candidate := range geminiResponse.Candidates {
 		for _, part := range candidate.Content.Parts {
+			// Clean the response
+			cleanText := strings.TrimSpace(part.Text)
+			cleanText = strings.TrimPrefix(cleanText, "```json")
+			cleanText = strings.TrimSuffix(cleanText, "```")
+			cleanText = strings.TrimSpace(cleanText)
+			
 			var result struct {
 				Confirmed  bool   `json:"confirmed"`
 				Confidence string `json:"confidence"`
 				Reason     string `json:"reason"`
 			}
-			if err := json.Unmarshal([]byte(part.Text), &result); err != nil {
-				return false, "", err
+			
+			if err := json.Unmarshal([]byte(cleanText), &result); err != nil {
+				g.logger.Debug("Failed to unmarshal analysis result: %v", err)
+				continue
 			}
+			
 			return result.Confirmed, result.Reason, nil
 		}
 	}
@@ -165,6 +194,8 @@ func (g *GeminiClient) makeRequestWithRetry(prompt string) (*GeminiResponse, err
 	var lastError error
 	
 	for retry := 0; retry < g.maxRetries; retry++ {
+		time.Sleep(g.rateLimit) // Respect rate limit
+		
 		currentKey := g.getCurrentKey()
 		g.logger.Debug("Using Gemini API key index %d (attempt %d/%d)", 
 			g.currentKey, retry+1, g.maxRetries)
@@ -189,7 +220,7 @@ func (g *GeminiClient) makeRequestWithRetry(prompt string) (*GeminiResponse, err
 		}
 		
 		// For other errors, wait and retry with same key
-		time.Sleep(1 * time.Second)
+		time.Sleep(time.Duration(retry+1) * time.Second)
 	}
 	
 	return nil, fmt.Errorf("all retries failed: %v", lastError)
@@ -221,6 +252,8 @@ func (g *GeminiClient) makeRequest(prompt, apiKey string) (*GeminiResponse, erro
 	}
 
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("User-Agent", "ACVA-Scanner/1.0")
+	
 	resp, err := g.httpClient.Do(req)
 	if err != nil {
 		return nil, err
@@ -251,4 +284,24 @@ func (g *GeminiClient) GetUsageStats() map[string]int {
 		stats[maskedKey] = count
 	}
 	return stats
+}
+
+// New method for vulnerability explanation
+func (g *GeminiClient) ExplainVulnerability(vulnType, details string) (string, error) {
+	prompt := fmt.Sprintf(`Explain the %s vulnerability in simple terms.
+	Details: %s
+	Provide a concise explanation suitable for security reports.`, vulnType, details)
+
+	response, err := g.makeRequestWithRetry(prompt)
+	if err != nil {
+		return "", err
+	}
+
+	for _, candidate := range response.Candidates {
+		for _, part := range candidate.Content.Parts {
+			return strings.TrimSpace(part.Text), nil
+		}
+	}
+
+	return "", fmt.Errorf("no explanation found in response")
 }
