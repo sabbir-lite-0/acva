@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/sabbir-lite-0/acva/utils"
+	"github.com/sabbir-lite-0/acva/core/gemini"
 )
 
 type Scanner struct {
@@ -21,10 +22,10 @@ type Scanner struct {
 	jsEngine     *JSEngine
 	cluster      *ClusterManager
 	stopChan     chan struct{}
-	geminiClient *GeminiClient
+	geminiClient *gemini.GeminiClient
 }
 
-func NewScanner(logger *utils.Logger, config utils.Config, httpClient *utils.HTTPClient, geminiClient *GeminiClient) *Scanner {
+func NewScanner(logger *utils.Logger, config utils.Config, httpClient *utils.HTTPClient, geminiClient *gemini.GeminiClient) *Scanner {
 	return &Scanner{
 		logger:       logger,
 		config:       config,
@@ -230,6 +231,36 @@ func (s *Scanner) MonitorPerformance() {
 func (s *Scanner) Stop() {
 	close(s.stopChan)
 	s.logger.Info("Scanner stopped gracefully")
+}
+
+// ScanConfig represents scan configuration for distributed scanning
+type ScanConfig struct {
+	Target    string   `json:"target"`
+	Modules   []string `json:"modules"`
+	Depth     int      `json:"depth"`
+	Timeout   int      `json:"timeout"`
+	ScanID    string   `json:"scan_id"`
+	StartedAt string   `json:"started_at"`
+}
+
+// ClusterManager manages distributed scanning
+type ClusterManager struct {
+	redisAddr string
+	logger    *utils.Logger
+	// Add Redis client and other cluster-related fields
+}
+
+func NewClusterManager(redisAddr string, logger *utils.Logger, config utils.Config) *ClusterManager {
+	return &ClusterManager{
+		redisAddr: redisAddr,
+		logger:    logger,
+	}
+}
+
+func (c *ClusterManager) DistributeScan(target string, scanConfig ScanConfig) (string, error) {
+	// Implement distributed scanning logic
+	c.logger.Info("Distributing scan for target: %s", target)
+	return "scan-123", nil
 }
 
 // HealthCheck performs health check on scanner components
