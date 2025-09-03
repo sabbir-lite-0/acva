@@ -1,3 +1,4 @@
+// In utils/http_client.go, remove the "strings" import:
 package utils
 
 import (
