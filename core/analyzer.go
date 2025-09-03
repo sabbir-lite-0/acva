@@ -13,16 +13,17 @@ import (
 	"unicode/utf8"
 
 	"github.com/sabbir-lite-0/acva/utils"
+	"github.com/sabbir-lite-0/acva/core/gemini"
 )
 
 type Analyzer struct {
 	logger       *utils.Logger
 	config       utils.Config
 	client       *utils.HTTPClient
-	geminiClient *GeminiClient
+	geminiClient *gemini.GeminiClient
 }
 
-func NewAnalyzer(logger *utils.Logger, config utils.Config, client *utils.HTTPClient, geminiClient *GeminiClient) *Analyzer {
+func NewAnalyzer(logger *utils.Logger, config utils.Config, client *utils.HTTPClient, geminiClient *gemini.GeminiClient) *Analyzer {
 	return &Analyzer{
 		logger:       logger,
 		config:       config,
@@ -206,17 +207,17 @@ func (a *Analyzer) AdvancedAnalysis(endpoint, responseBody string) ([]Vulnerabil
 func (a *Analyzer) isPotentialSQLi(response string) bool {
 	// Advanced SQL error patterns
 	patterns := []string{
-		`(sql syntax.*error|syntax error.*sql)`,
-		`(mysql.*error|warning.*mysql)`,
-		`(ORA-[0-9]{5})`,
-		`(PostgreSQL.*ERROR)`,
-		`(Driver.*SQL[-\_ ]*Server)`,
-		`(Unclosed quotation mark)`,
-		`(quoted string not properly terminated)`,
+		`(?i)(sql syntax.*error|syntax error.*sql)`,
+		`(?i)(mysql.*error|warning.*mysql)`,
+		`(?i)(ORA-[0-9]{5})`,
+		`(?i)(PostgreSQL.*ERROR)`,
+		`(?i)(Driver.*SQL[-\_ ]*Server)`,
+		`(?i)(Unclosed quotation mark)`,
+		`(?i)(quoted string not properly terminated)`,
 	}
 	
 	for _, pattern := range patterns {
-		if matched, _ := regexp.MatchString(pattern, response, regexp.IgnoreCase); matched {
+		if matched, _ := regexp.MatchString(pattern, response); matched {
 			return true
 		}
 	}
@@ -226,17 +227,17 @@ func (a *Analyzer) isPotentialSQLi(response string) bool {
 func (a *Analyzer) isPotentialXSS(response string) bool {
 	// XSS patterns
 	patterns := []string{
-		`<script>`,
-		`javascript:`,
-		`onerror=`,
-		`onload=`,
-		`onclick=`,
-		`alert\(`,
-		`document\.cookie`,
+		`(?i)<script>`,
+		`(?i)javascript:`,
+		`(?i)onerror=`,
+		`(?i)onload=`,
+		`(?i)onclick=`,
+		`(?i)alert\(`,
+		`(?i)document\.cookie`,
 	}
 	
 	for _, pattern := range patterns {
-		if matched, _ := regexp.MatchString(pattern, response, regexp.IgnoreCase); matched {
+		if matched, _ := regexp.MatchString(pattern, response); matched {
 			return true
 		}
 	}
@@ -246,15 +247,15 @@ func (a *Analyzer) isPotentialXSS(response string) bool {
 func (a *Analyzer) isPotentialCommandInjection(response string) bool {
 	// Command injection patterns
 	patterns := []string{
-		`(bin/bash|bin/sh)`,
-		`(cmd\.exe|command\.com)`,
-		`(whoami|id|ls|dir)`,
-		`(root|administrator)`,
-		`(nt authority|linux|windows)`,
+		`(?i)(bin/bash|bin/sh)`,
+		`(?i)(cmd\.exe|command\.com)`,
+		`(?i)(whoami|id|ls|dir)`,
+		`(?i)(root|administrator)`,
+		`(?i)(nt authority|linux|windows)`,
 	}
 	
 	for _, pattern := range patterns {
-		if matched, _ := regexp.MatchString(pattern, response, regexp.IgnoreCase); matched {
+		if matched, _ := regexp.MatchString(pattern, response); matched {
 			return true
 		}
 	}
@@ -345,7 +346,7 @@ func (a *Analyzer) checkAdminEndpoints(urlStr string) []Vulnerability {
 				CWE:         "CWE-200",
 				CVSS:        3.5,
 				Remediation: "Implement proper access controls and consider obfuscating admin URLs",
-				References:  []string{"https://owasp.org/www-project-web-security-testing-guide/latest/4-Web_Application_Security_Testing/05-Authorization_Testing/04-Testing_for_Insecure_Direct_Object_References"},
+				References:  []string{"https://owasp.org/www-project-top-ten/2017/A5_2017-Broken_Access_Control"},
 			}
 			vulnerabilities = append(vulnerabilities, vuln)
 		}
