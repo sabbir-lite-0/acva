@@ -64,7 +64,7 @@ type Config struct {
 		Timeout          int    `yaml:"timeout"`
 		Headless         bool   `yaml:"headless"`
 		UserAgent        string `yaml:"user_agent"`
-		WaitFor          int    `yaml:"wait_for"`
+		WaitFor          int   `yaml:"wait_for"`
 		ViewportWidth    int    `yaml:"viewport_width"`
 		ViewportHeight   int    `yaml:"viewport_height"`
 		ExecuteScripts   bool   `yaml:"execute_scripts"`
@@ -384,7 +384,7 @@ func CheckGitHubUpdates(owner, repo, currentVersion string) error {
 	
 	if latestVersion != currentVersion {
 		color.New(color.FgYellow).Printf("Update available: %s -> %s\n", currentVersion, latestVersion)
-		color.New(color.FgCyan).Printf("Download from: %s\n", release.HTMLURL)
+		color.New(color.FgCyan).Printf("Download from: %s\n", release.HTQLURL)
 	} else {
 		color.New(color.FgGreen).Printf("You are using the latest version: %s\n", currentVersion)
 	}
