@@ -1,337 +1,216 @@
-// SPDX-License-Identifier: MIT
 package core
 
 import (
 	"encoding/json"
-	"fmt"
+	"log"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/gorilla/mux"
 	"github.com/gorilla/websocket"
-	"github.com/sabbir-lite-0/acva/utils"
 )
 
-// --- In-memory state (minimal viable implementation) ---
-
-type scanStatus struct {
-	ID         string           `json:"id"`
-	Target     string           `json:"target"`
-	Modules    []string         `json:"modules,omitempty"`
-	Status     string           `json:"status"` // queued, running, completed, error, stopped
-	StartedAt  time.Time        `json:"started_at"`
-	FinishedAt *time.Time       `json:"finished_at,omitempty"`
-	Error      string           `json:"error,omitempty"`
-	Results    []Vulnerability  `json:"results,omitempty"`
-}
-
 type APIServer struct {
-	logger      *utils.Logger
-	config      utils.Config
-	scanner     *Scanner
-	dashboard   *Dashboard
-	router      *mux.Router
-
-	// local state
-	scans       map[string]*scanStatus
-	reports     map[string][]Vulnerability
+	scanner   *Scanner
+	reporter  *Reporter
+	cluster   *ClusterManager
+	dashboard *Dashboard
+	mu        sync.Mutex
 }
 
-func NewAPIServer(logger *utils.Logger, config utils.Config, scanner *Scanner, dashboard *Dashboard) *APIServer {
-	s := &APIServer{
-		logger:    logger,
-		config:    config,
+func NewAPIServer(scanner *Scanner, reporter *Reporter, cluster *ClusterManager, dashboard *Dashboard) *APIServer {
+	return &APIServer{
 		scanner:   scanner,
+		reporter:  reporter,
+		cluster:   cluster,
 		dashboard: dashboard,
-		router:    mux.NewRouter(),
-		scans:     map[string]*scanStatus{},
-		reports:   map[string][]Vulnerability{},
 	}
-	s.setupRoutes()
-	return s
 }
 
-func (s *APIServer) Router() *mux.Router {
-	return s.router
+func (s *APIServer) RegisterRoutes(r *mux.Router) {
+	// Scan routes
+	r.HandleFunc("/api/scan/status/{id}", s.getScanStatus).Methods("GET")
+	r.HandleFunc("/api/scan/stop/{id}", s.stopScan).Methods("POST")
+	r.HandleFunc("/api/scans", s.listScans).Methods("GET")
+
+	// Dashboard routes
+	r.HandleFunc("/api/dashboard/ws", s.handleDashboardWebSocket)
+	r.HandleFunc("/api/dashboard/stats", s.getDashboardStats).Methods("GET")
+
+	// Report routes
+	r.HandleFunc("/api/reports", s.listReports).Methods("GET")
+	r.HandleFunc("/api/report/{id}", s.getReport).Methods("GET")
+	r.HandleFunc("/api/report/{id}", s.deleteReport).Methods("DELETE")
+
+	// Cluster routes
+	r.HandleFunc("/api/cluster/nodes", s.getClusterNodes).Methods("GET")
+	r.HandleFunc("/api/cluster/nodes/{id}", s.getClusterNode).Methods("GET")
+	r.HandleFunc("/api/cluster/stats", s.getClusterStats).Methods("GET")
+
+	// Scan trigger
+	r.HandleFunc("/api/scan", s.startScan).Methods("POST")
 }
 
-func (s *APIServer) Start(addr string) error {
-	s.logger.Info("Starting API server on %s", addr)
-	return http.ListenAndServe(addr, s.router)
-}
-
-func (s *APIServer) setupRoutes() {
-	api := s.router.PathPrefix("/api/v1").Subrouter()
-
-	// Scan endpoints
-	api.HandleFunc("/scan", s.startScan).Methods("POST")
-	api.HandleFunc("/scan/{id}", s.getScanStatus).Methods("GET")
-	api.HandleFunc("/scan/{id}", s.stopScan).Methods("DELETE")
-	api.HandleFunc("/scans", s.listScans).Methods("GET")
-
-	// Dashboard endpoints
-	api.HandleFunc("/dashboard/ws", s.handleDashboardWebSocket)
-	api.HandleFunc("/dashboard/stats", s.getDashboardStats).Methods("GET")
-
-	// Report endpoints
-	api.HandleFunc("/reports", s.listReports).Methods("GET")
-	api.HandleFunc("/reports/{id}", s.getReport).Methods("GET")
-	api.HandleFunc("/reports/{id}", s.deleteReport).Methods("DELETE")
-
-	// Cluster endpoints (best-effort)
-	api.HandleFunc("/cluster/nodes", s.getClusterNodes).Methods("GET")
-	api.HandleFunc("/cluster/nodes/{id}", s.getClusterNode).Methods("GET")
-	api.HandleFunc("/cluster/stats", s.getClusterStats).Methods("GET")
-
-	// Serve static (optional)
-	s.router.PathPrefix("/").Handler(http.FileServer(http.Dir("./static/")))
-}
-
-// ---- Handlers ----
-
-// startScan kicks off a scan using the Scanner. It stores status in-memory.
 func (s *APIServer) startScan(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Target  string   `json:"target"`
-		Modules []string `json:"modules"` // e.g., ["crawler","fuzzer","api","js"]
+		Target string `json:"target"`
+		Mode   string `json:"mode"`
 	}
-
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		s.respondWithError(w, http.StatusBadRequest, "invalid request body")
-		return
-	}
-	if req.Target == "" {
-		s.respondWithError(w, http.StatusBadRequest, "target is required")
+		s.respondWithError(w, http.StatusBadRequest, "Invalid request payload")
 		return
 	}
 
-	id := s.generateID()
-	entry := &scanStatus{
-		ID:        id,
-		Target:    req.Target,
-		Modules:   req.Modules,
-		Status:    "queued",
-		StartedAt: time.Now(),
-	}
-	s.scans[id] = entry
+	id := time.Now().Format("20060102150405")
 
-	// notify dashboard
-	if s.dashboard != nil {
-		s.dashboard.BroadcastUpdate(DashboardMessage{
-			Type: "scan_started",
-			Message: "scan queued",
-			Data: map[string]interface{}{"id": id, "target": req.Target},
-			Timestamp: time.Now(),
-		})
-	}
+	// Broadcast scan start
+	s.dashboard.BroadcastUpdate(DashboardMessage{
+		Type: "scan_started",
+		Data: map[string]interface{}{"id": id, "target": req.Target},
+	})
 
 	go func() {
-		entry.Status = "running"
-		var vulns []Vulnerability
+		var vulnerabilities []Vulnerability
+		var stages []string
 
-		runAll := len(req.Modules) == 0
 		add := func(vs []Vulnerability, err error, stage string) {
 			if err != nil {
-				s.logger.Error("%s failed: %v", stage, err)
+				log.Printf("Stage %s failed: %v", stage, err)
 				return
 			}
-			vulns = append(vulns, vs...)
-		}
-
-		if runAll || contains(req.Modules, "crawler") {
-			add(s.scanner.CrawlAndAnalyze(r.Context(), req.Target, nil), "crawl+analyze")
-		}
-		if runAll || contains(req.Modules, "fuzzer") {
-			add(s.scanner.FuzzTarget(r.Context(), req.Target, nil), "fuzzer")
-		}
-		if runAll || contains(req.Modules, "api") {
-			add(s.scanner.ScanAPIs(r.Context(), req.Target, nil), "api-scan")
-		}
-		if runAll || contains(req.Modules, "js") {
-			add(s.scanner.AnalyzeJavaScript(r.Context(), req.Target, nil), "js-analyze")
-		}
-
-		entry.Results = vulns
-		entry.Status = "completed"
-		now := time.Now()
-		entry.FinishedAt = &now
-
-		// store a "report" for the ID (best-effort)
-		s.reports[id] = vulns
-
-		if s.dashboard != nil {
+			vulnerabilities = append(vulnerabilities, vs...)
+			stages = append(stages, stage)
 			s.dashboard.BroadcastUpdate(DashboardMessage{
-				Type: "scan_completed",
-				Message: "scan finished",
-				Data: map[string]interface{}{"id": id, "vulnerabilities": len(vulns)},
-				Timestamp: time.Now(),
+				Type: "stage_completed",
+				Data: map[string]interface{}{"id": id, "stage": stage},
 			})
 		}
+
+		switch req.Mode {
+		case "crawl":
+			vs, err := s.scanner.CrawlAndAnalyze(r.Context(), req.Target, nil)
+			add(vs, err, "crawl+analyze")
+		case "fuzz":
+			vs, err := s.scanner.FuzzTarget(r.Context(), req.Target, nil)
+			add(vs, err, "fuzz")
+		case "api":
+			vs, err := s.scanner.ScanAPIs(r.Context(), req.Target, nil)
+			add(vs, err, "api_scan")
+		case "js":
+			vs, err := s.scanner.AnalyzeJavaScript(r.Context(), req.Target, nil)
+			add(vs, err, "js_analysis")
+		default:
+			vs, err := s.scanner.CrawlAndAnalyze(r.Context(), req.Target, nil)
+			add(vs, err, "crawl+analyze")
+			vs, err = s.scanner.FuzzTarget(r.Context(), req.Target, nil)
+			add(vs, err, "fuzz")
+			vs, err = s.scanner.ScanAPIs(r.Context(), req.Target, nil)
+			add(vs, err, "api_scan")
+			vs, err = s.scanner.AnalyzeJavaScript(r.Context(), req.Target, nil)
+			add(vs, err, "js_analysis")
+		}
+
+		report := Report{
+			ID:              id,
+			Target:          req.Target,
+			Vulnerabilities: vulnerabilities,
+			GeneratedAt:     time.Now(),
+		}
+		s.reporter.SaveReport(report)
+
+		s.dashboard.BroadcastUpdate(DashboardMessage{
+			Type: "scan_completed",
+			Data: map[string]interface{}{"id": id, "stages": stages},
+		})
 	}()
 
-	s.respondWithJSON(w, http.StatusAccepted, map[string]string{"id": id, "status": "queued"})
+	s.respondWithJSON(w, http.StatusAccepted, map[string]string{"id": id})
 }
 
-func contains(arr []string, v string) bool {
-	for _, s := range arr {
-		if s == v {
-			return true
-		}
-	}
-	return false
-}
-
+// --- Scan handlers ---
 func (s *APIServer) getScanStatus(w http.ResponseWriter, r *http.Request) {
-	id := mux.Vars(r)["id"]
-	if id == "" {
-		s.respondWithError(w, http.StatusBadRequest, "missing id")
-		return
-	}
-	entry, ok := s.scans[id]
-	if !ok {
-		s.respondWithError(w, http.StatusNotFound, "scan not found")
-		return
-	}
-	s.respondWithJSON(w, http.StatusOK, entry)
+	s.respondWithError(w, http.StatusNotImplemented, "getScanStatus not implemented")
 }
 
 func (s *APIServer) stopScan(w http.ResponseWriter, r *http.Request) {
-	id := mux.Vars(r)["id"]
-	entry, ok := s.scans[id]
-	if !ok {
-		s.respondWithError(w, http.StatusNotFound, "scan not found")
-		return
-	}
-	// best-effort: we don't have a cancelable context in this skeleton,
-	// mark as stopped.
-	entry.Status = "stopped"
-	now := time.Now()
-	entry.FinishedAt = &now
-
-	if s.dashboard != nil {
-		s.dashboard.BroadcastUpdate(DashboardMessage{
-			Type: "scan_stopped",
-			Message: "scan stopped by user",
-			Data: map[string]interface{}{"id": id},
-			Timestamp: time.Now(),
-		})
-	}
-
-	s.respondWithJSON(w, http.StatusOK, map[string]string{"status": "stopped"})
+	s.respondWithError(w, http.StatusNotImplemented, "stopScan not implemented")
 }
 
 func (s *APIServer) listScans(w http.ResponseWriter, r *http.Request) {
-	out := make([]*scanStatus, 0, len(s.scans))
-	for _, v := range s.scans {
-		out = append(out, v)
-	}
-	s.respondWithJSON(w, http.StatusOK, out)
+	s.respondWithJSON(w, http.StatusOK, []string{})
 }
 
-// WebSocket: delegate to dashboard if available, else provide a basic echo of stats
+// --- Dashboard handlers ---
 func (s *APIServer) handleDashboardWebSocket(w http.ResponseWriter, r *http.Request) {
-	if s.dashboard != nil {
-		// dashboard has its own upgrader/handler
-		s.dashboard.HandleWebSocket(w, r)
-		return
-	}
-	// Fallback minimal websocket
-	upgrader := websocket.Upgrader{
-		CheckOrigin: func(r *http.Request) bool { return true },
-	}
+	upgrader := websocket.Upgrader{CheckOrigin: func(r *http.Request) bool { return true }}
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
-		http.Error(w, "upgrade failed", http.StatusBadRequest)
+		log.Println("WebSocket upgrade error:", err)
 		return
 	}
-	defer conn.Close()
-	for {
-		stats := map[string]interface{}{
-			"connected_clients": 1,
-			"timestamp":         time.Now().Format(time.RFC3339),
-		}
-		_ = conn.WriteJSON(stats)
-		time.Sleep(3 * time.Second)
-	}
+	s.dashboard.AddClient(conn)
 }
 
 func (s *APIServer) getDashboardStats(w http.ResponseWriter, r *http.Request) {
-	if s.dashboard != nil {
-		s.respondWithJSON(w, http.StatusOK, s.dashboard.GetStats())
-		return
-	}
-	s.respondWithJSON(w, http.StatusOK, map[string]interface{}{
-		"connected_clients": 0,
-		"timestamp":         time.Now().Format(time.RFC3339),
-	})
+	stats := s.dashboard.GetStats()
+	s.respondWithJSON(w, http.StatusOK, stats)
 }
 
+// --- Report handlers ---
 func (s *APIServer) listReports(w http.ResponseWriter, r *http.Request) {
-	list := make([]map[string]interface{}, 0, len(s.reports))
-	for id, vulns := range s.reports {
-		list = append(list, map[string]interface{}{
-			"id":               id,
-			"vulnerability_count": len(vulns),
-		})
-	}
-	s.respondWithJSON(w, http.StatusOK, list)
+	reports := s.reporter.ListReports()
+	s.respondWithJSON(w, http.StatusOK, reports)
 }
 
 func (s *APIServer) getReport(w http.ResponseWriter, r *http.Request) {
 	id := mux.Vars(r)["id"]
-	v, ok := s.reports[id]
-	if !ok {
-		s.respondWithError(w, http.StatusNotFound, "report not found")
+	report, err := s.reporter.LoadReport(id)
+	if err != nil {
+		s.respondWithError(w, http.StatusNotFound, "Report not found")
 		return
 	}
-	s.respondWithJSON(w, http.StatusOK, map[string]interface{}{
-		"id":            id,
-		"vulnerabilities": v,
-	})
+	s.respondWithJSON(w, http.StatusOK, report)
 }
 
 func (s *APIServer) deleteReport(w http.ResponseWriter, r *http.Request) {
 	id := mux.Vars(r)["id"]
-	if _, ok := s.reports[id]; !ok {
-		s.respondWithError(w, http.StatusNotFound, "report not found")
+	if err := s.reporter.DeleteReport(id); err != nil {
+		s.respondWithError(w, http.StatusInternalServerError, "Failed to delete report")
 		return
 	}
-	delete(s.reports, id)
 	s.respondWithJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 }
 
+// --- Cluster handlers ---
 func (s *APIServer) getClusterNodes(w http.ResponseWriter, r *http.Request) {
-	// No direct cluster exposure in placeholders; return empty list
-	s.respondWithJSON(w, http.StatusOK, []map[string]string{})
+	nodes := s.cluster.ListNodes()
+	s.respondWithJSON(w, http.StatusOK, nodes)
 }
 
 func (s *APIServer) getClusterNode(w http.ResponseWriter, r *http.Request) {
-	// No direct cluster state; return 404
-	s.respondWithError(w, http.StatusNotFound, "node not found")
+	id := mux.Vars(r)["id"]
+	node, err := s.cluster.GetNode(id)
+	if err != nil {
+		s.respondWithError(w, http.StatusNotFound, "Node not found")
+		return
+	}
+	s.respondWithJSON(w, http.StatusOK, node)
 }
 
 func (s *APIServer) getClusterStats(w http.ResponseWriter, r *http.Request) {
-	// Provide scanner health as "cluster" stats
-	stats := s.scanner.HealthCheck()
-	s.respondWithJSON(w, http.StatusOK, map[string]interface{}{
-		"health": stats,
-		"time":   time.Now().Format(time.RFC3339),
-	})
+	stats := s.cluster.GetStats()
+	s.respondWithJSON(w, http.StatusOK, stats)
 }
 
-// ---- helpers ----
-
+// --- Helpers ---
 func (s *APIServer) respondWithJSON(w http.ResponseWriter, code int, payload interface{}) {
-	resp, _ := json.Marshal(payload)
+	response, _ := json.Marshal(payload)
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
-	_, _ = w.Write(resp)
+	w.Write(response)
 }
 
 func (s *APIServer) respondWithError(w http.ResponseWriter, code int, message string) {
 	s.respondWithJSON(w, code, map[string]string{"error": message})
-}
-
-func (s *APIServer) generateID() string {
-	return fmt.Sprintf("%d", time.Now().UnixNano())
 }
