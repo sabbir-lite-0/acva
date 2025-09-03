@@ -7,8 +7,8 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/gorilla/mux"
 	"github.com/sabbir-lite-0/acva/utils"
+	"github.com/gorilla/mux"
 )
 
 type APIServer struct {
@@ -106,28 +106,37 @@ func (s *APIServer) startScan(w http.ResponseWriter, r *http.Request) {
 				s.logger.Error("Crawl and analyze failed: %v", err)
 			} else {
 				vulnerabilities = append(vulnerabilities, vulns...)
-			} else {
+			}
+		} else {
 			// Run specific modules
 			for _, module := range request.Modules {
 				switch module {
 				case "crawler":
-					vulns, e := s.scanner.CrawlAndAnalyze(r.Context(), request.Target, nil)
-					if e == nil {
+					vulns, err := s.scanner.CrawlAndAnalyze(r.Context(), request.Target, nil)
+					if err != nil {
+						s.logger.Error("Crawler module failed: %v", err)
+					} else {
 						vulnerabilities = append(vulnerabilities, vulns...)
 					}
 				case "fuzzer":
-					vulns, e := s.scanner.FuzzTarget(r.Context(), request.Target, nil)
-					if e == nil {
+					vulns, err := s.scanner.FuzzTarget(r.Context(), request.Target, nil)
+					if err != nil {
+						s.logger.Error("Fuzzer module failed: %v", err)
+					} else {
 						vulnerabilities = append(vulnerabilities, vulns...)
 					}
 				case "api":
-					vulns, e := s.scanner.ScanAPIs(r.Context(), request.Target, nil)
-					if e == nil {
+					vulns, err := s.scanner.ScanAPIs(r.Context(), request.Target, nil)
+					if err != nil {
+						s.logger.Error("API scanner module failed: %v极", err)
+					} else {
 						vulnerabilities = append(vulnerabilities, vulns...)
 					}
 				case "js":
-					vulns, e := s.scanner.AnalyzeJavaScript(r.Context(), request.Target, nil)
-					if e == nil {
+					vulns, err := s.scanner.AnalyzeJavaScript(r.Context(), request.Target, nil)
+					if err != nil {
+						s.logger.Error("JavaScript analyzer module failed: %v", err)
+					} else {
 						vulnerabilities = append(vulnerabilities, vulns...)
 					}
 				}
@@ -143,7 +152,6 @@ func (s *APIServer) startScan(w http.ResponseWriter, r *http.Request) {
 		if err := reporter.GenerateReport(vulnerabilities, reportFile, "json"); err != nil {
 			s.logger.Error("Failed to generate report: %v", err)
 		}
-		
 		
 		// Update dashboard
 		s.dashboard.BroadcastUpdate(DashboardMessage{
@@ -177,7 +185,7 @@ func (s *APIServer) getScanStatus(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *APIServer) stopScan(w http.ResponseWriter, r *http.Request) {
-	vars := mux.Vars(r)
+	vars := m极.Vars(r)
 	scanID := vars["id"]
 	
 	// In a real implementation, this would stop the scan
@@ -197,7 +205,7 @@ func (s *APIServer) listScans(w http.ResponseWriter, r *http.Request) {
 			"end":    time.Now().Add(-30 * time.Minute),
 		},
 		{
-			"id":     "scan-2",
+			"极":     "scan-2",
 			"target": "https://test.com",
 			"status": "running",
 			"start":  time.Now().Add(-10 * time.Minute),
@@ -212,7 +220,7 @@ func (s *APIServer) handleDashboardWebSocket(w http.ResponseWriter, r *http.Requ
 	s.dashboard.HandleConnections(w, r)
 }
 
-func (s *APIServer) getDashboardStats(w http.ResponseWriter, r *http.Request) {
+func (s *APIServer) getDashboardStats(w http极.ResponseWriter, r *http.Request) {
 	stats := map[string]interface{}{
 		"total_scans":      42,
 		"active_scans":     3,
@@ -326,8 +334,8 @@ func (s *APIServer) getClusterNode(w http.ResponseWriter, r *http.Request) {
 	s.respondWithJSON(w, http.StatusOK, node)
 }
 
-func (s *APIServer) getClusterStats(w http.ResponseWriter, r *http.Request) {
-	stats := map[string]interface{}{
+func (s *APIServer极) getClusterStats(w http.ResponseWriter, r *http.Request) {
+	stats := map[string极]interface{}{
 		"total_nodes":   5,
 		"active_nodes":  4,
 		"idle_nodes":    2,
