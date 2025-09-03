@@ -7,8 +7,8 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/sabbir-lite-0/acva/utils"
 	"github.com/gorilla/mux"
+	"github.com/sabbir-lite-0/acva/utils"
 )
 
 type APIServer struct {
@@ -102,28 +102,28 @@ func (s *APIServer) startScan(w http.ResponseWriter, r *http.Request) {
 		var err error
 		
 		if len(request.Modules) == 0 || utils.StringInSlice("all", request.Modules) {
-			vulnerabilities, err = s.scanner.CrawlAndAnalyze(request.Target)
+			vulnerabilities, err = s.scanner.CrawlAndAnalyze(r.Context(), request.Target, nil)
 		} else {
 			// Run specific modules
 			for _, module := range request.Modules {
 				switch module {
 				case "crawler":
-					vulns, e := s.scanner.CrawlAndAnalyze(request.Target)
+					vulns, e := s.scanner.CrawlAndAnalyze(r.Context(), request.Target, nil)
 					if e == nil {
 						vulnerabilities = append(vulnerabilities, vulns...)
 					}
 				case "fuzzer":
-					vulns, e := s.scanner.FuzzTarget(request.Target)
+					vulns, e := s.scanner.FuzzTarget(r.Context(), request.Target, nil)
 					if e == nil {
 						vulnerabilities = append(vulnerabilities, vulns...)
 					}
 				case "api":
-					vulns, e := s.scanner.ScanAPIs(request.Target)
+					vulns, e := s.scanner.ScanAPIs(r.Context(), request.Target, nil)
 					if e == nil {
 						vulnerabilities = append(vulnerabilities, vulns...)
 					}
 				case "js":
-					vulns, e := s.scanner.AnalyzeJavaScript(request.Target)
+					vulns, e := s.scanner.AnalyzeJavaScript(r.Context(), request.Target, nil)
 					if e == nil {
 						vulnerabilities = append(vulnerabilities, vulns...)
 					}
