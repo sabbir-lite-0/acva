@@ -384,7 +384,7 @@ func CheckGitHubUpdates(owner, repo, currentVersion string) error {
 	
 	if latestVersion != currentVersion {
 		color.New(color.FgYellow).Printf("Update available: %s -> %s\n", currentVersion, latestVersion)
-		color.New(color.FgCyan).Printf("Download from: %s\n", release.HTQLURL)
+		color.New(color.FgCyan).Printf("Download from: %s\n", release.HTMLURL)
 	} else {
 		color.New(color.FgGreen).Printf("You are using the latest version: %s\n", currentVersion)
 	}
