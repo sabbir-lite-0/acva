@@ -5,6 +5,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/fatih/color"
 	"github.com/schollz/progressbar/v3"
 )
 
