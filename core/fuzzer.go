@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/sabbir-lite-0/acva/utils"
+	"github.com/sabbir-lite-0/acva/core/gemini"
 )
 
 type Fuzzer struct {
@@ -17,10 +18,10 @@ type Fuzzer struct {
 	config       utils.Config
 	client       *utils.HTTPClient
 	wordlist     []string
-	geminiClient *GeminiClient
+	geminiClient *gemini.GeminiClient
 }
 
-func NewFuzzer(logger *utils.Logger, config utils.Config, client *utils.HTTPClient, geminiClient *GeminiClient) *Fuzzer {
+func NewFuzzer(logger *utils.Logger, config utils.Config, client *utils.HTTPClient, geminiClient *gemini.GeminiClient) *Fuzzer {
 	fuzzer := &Fuzzer{
 		logger:       logger,
 		config:       config,
