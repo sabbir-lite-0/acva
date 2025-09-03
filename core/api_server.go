@@ -99,11 +99,14 @@ func (s *APIServer) startScan(w http.ResponseWriter, r *http.Request) {
 		
 		// Run scan based on requested modules
 		var vulnerabilities []Vulnerability
-		var err error
 		
 		if len(request.Modules) == 0 || utils.StringInSlice("all", request.Modules) {
-			vulnerabilities, err = s.scanner.CrawlAndAnalyze(r.Context(), request.Target, nil)
-		} else {
+			vulns, err := s.scanner.CrawlAndAnalyze(r.Context(), request.Target, nil)
+			if err != nil {
+				s.logger.Error("Crawl and analyze failed: %v", err)
+			} else {
+				vulnerabilities = append(vulnerabilities, vulns...)
+			} else {
 			// Run specific modules
 			for _, module := range request.Modules {
 				switch module {
