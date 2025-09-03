@@ -345,7 +345,7 @@ func (a *Analyzer) checkAdminEndpoints(urlStr string) []Vulnerability {
 				CWE:         "CWE-200",
 				CVSS:        3.5,
 				Remediation: "Implement proper access controls and consider obfuscating admin URLs",
-				References:  []string{"https://owasp.org/www-project-top-ten/2017/A5_2017-Broken_Access_Control"},
+				References:  []string{"https://owasp.org/www-project-web-security-testing-guide/latest/4-Web_Application_Security_Testing/05-Authorization_Testing/04-Testing_for_Insecure_Direct_Object_References"},
 			}
 			vulnerabilities = append(vulnerabilities, vuln)
 		}
