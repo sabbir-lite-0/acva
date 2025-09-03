@@ -158,14 +158,21 @@ func (f *Fuzzer) generateFuzzedURLs(originalURL, payload string) []string {
 	// Fuzz query parameters
 	query := parsed.Query()
 	for param := range query {
-		fuzzedQuery := query.Clone()
+		// Manual clone of url.Values
+		fuzzedQuery := make(url.Values)
+		for k, v := range query {
+			fuzzedQuery[k] = v
+		}
 		fuzzedQuery.Set(param, payload)
 		parsed.RawQuery = fuzzedQuery.Encode()
 		fuzzedURLs = append(fuzzedURLs, parsed.String())
 	}
 	
 	// Add new parameter
-	newParamQuery := query.Clone()
+	newParamQuery := make(url.Values)
+	for k, v := range query {
+		newParamQuery[k] = v
+	}
 	newParamQuery.Set("fuZZ_"+payload, payload)
 	parsed.RawQuery = newParamQuery.Encode()
 	fuzzedURLs = append(fuzzedURLs, parsed.String())
@@ -186,7 +193,7 @@ func (f *Fuzzer) generateFuzzedURLs(originalURL, payload string) []string {
 	
 	// Add payload to end of path
 	parsed.Path = parsed.Path + "/" + payload
-	fuzzedURLs = append(fuzzedURLs, parsed.String())
+	fuzzedURLs = append(fuzzedURL極, parsed.String())
 	
 	return fuzzedURLs
 }
