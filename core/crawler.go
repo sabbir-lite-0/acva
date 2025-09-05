@@ -18,8 +18,7 @@ type Crawler struct {
 	baseURL     string
 	logger      *utils.Logger
 	config      utils.Config
-	visitedURLs map[string]bool
-	urlMutex    sync.Mutex
+	visitedURLs *sync.Map
 	client      *utils.HTTPClient
 }
 
@@ -27,7 +26,7 @@ func NewCrawler(logger *utils.Logger, config utils.Config, client *utils.HTTPCli
 	return &Crawler{
 		logger:      logger,
 		config:      config,
-		visitedURLs: make(map[string]bool),
+		visitedURLs: &sync.Map{},
 		client:      client,
 	}
 }
@@ -41,54 +40,57 @@ func (c *Crawler) Crawl(baseURL string) ([]string, error) {
 	depth := 0
 	
 	for len(queue) > 0 && depth <= c.config.Scan.Depth && len(allEndpoints) < c.config.Scan.MaxPages {
-		currentURL := queue[0]
-		queue = queue[1:]
+		currentLevelSize := len(queue)
 		
-		if c.isVisited(currentURL) {
-			continue
-		}
-		
-		c.markVisited(currentURL)
-		
-		// Fetch page content
-		body, err := c.client.Get(currentURL)
-		if err != nil {
-			c.logger.Debug("Failed to fetch %s: %v", currentURL, err)
-			continue
-		}
-		
-		// Extract links from HTML
-		links := c.extractLinks(body, currentURL)
-		
-		// Find API endpoints in JavaScript
-		apiEndpoints := c.findAPIEndpoints(body)
-		
-		// Find forms and their action URLs
-		formEndpoints := c.extractFormActions(body, currentURL)
-		
-		// Combine all endpoints
-		pageEndpoints := append(links, apiEndpoints...)
-		pageEndpoints = append(pageEndpoints, formEndpoints...)
-		
-		// Clean and filter endpoints
-		cleanEndpoints := c.cleanEndpoints(pageEndpoints)
-		
-		// Add to results
-		allEndpoints = append(allEndpoints, cleanEndpoints...)
-		
-		// Add new URLs to queue for next depth level
-		for _, endpoint := range cleanEndpoints {
-			if !c.isVisited(endpoint) && c.isSameDomain(endpoint) {
-				queue = append(queue, endpoint)
+		for i := 0; i < currentLevelSize; i++ {
+			currentURL := queue[0]
+			queue = queue[1:]
+			
+			if c.isVisited(currentURL) {
+				continue
+			}
+			
+			c.markVisited(currentURL)
+			
+			// Fetch page content
+			body, err := c.client.Get(currentURL)
+			if err != nil {
+				c.logger.Debug("Failed to fetch %s: %v", currentURL, err)
+				continue
+			}
+			
+			// Extract links from HTML
+			links := c.extractLinks(body, currentURL)
+			
+			// Find API endpoints in JavaScript
+			apiEndpoints := c.findAPIEndpoints(body)
+			
+			// Find forms and their action URLs
+			formEndpoints := c.extractFormActions(body, currentURL)
+			
+			// Combine all endpoints
+			pageEndpoints := append(links, apiEndpoints...)
+			pageEndpoints = append(pageEndpoints, formEndpoints...)
+			
+			// Clean and filter endpoints
+			cleanEndpoints := c.cleanEndpoints(pageEndpoints)
+			
+			// Add to results
+			allEndpoints = append(allEndpoints, cleanEndpoints...)
+			
+			// Add new URLs to queue for next depth level
+			for _, endpoint := range cleanEndpoints {
+				if !c.isVisited(endpoint) && c.isSameDomain(endpoint) {
+					queue = append(queue, endpoint)
+				}
+			}
+			
+			// Respect delay between requests
+			if c.config.Scan.Delay > 0 {
+				time.Sleep(time.Duration(c.config.Scan.Delay) * time.Millisecond)
 			}
 		}
-		
 		depth++
-		
-		// Respect delay between requests
-		if c.config.Scan.Delay > 0 {
-			time.Sleep(time.Duration(c.config.Scan.Delay) * time.Millisecond)
-		}
 	}
 	
 	// Remove duplicates
@@ -263,15 +265,12 @@ func (c *Crawler) isSameDomain(urlStr string) bool {
 }
 
 func (c *Crawler) isVisited(url string) bool {
-	c.urlMutex.Lock()
-	defer c.urlMutex.Unlock()
-	return c.visitedURLs[url]
+	_, exists := c.visitedURLs.Load(url)
+	return exists
 }
 
 func (c *Crawler) markVisited(url string) {
-	c.urlMutex.Lock()
-	defer c.urlMutex.Unlock()
-	c.visitedURLs[url] = true
+	c.visitedURLs.Store(url, true)
 }
 
 func (c *Crawler) removeDuplicates(urls []string) []string {
