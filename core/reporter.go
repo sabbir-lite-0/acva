@@ -364,7 +364,7 @@ func (r *Reporter) generatePDFReport(vulnerabilities []Vulnerability, filename s
 	// This requires wkhtmltopdf or similar to be installed
 	cmd := exec.Command("wkhtmltopdf", htmlFile, filename)
 	if err := cmd.Run(); err != nil {
-		r.logger.Warning("PDF generation failed, falling back to HTML: %v", err)
+		r.logger.Warn("PDF generation failed, falling back to HTML: %v", err)
 		// Fall back to HTML if PDF generation fails
 		return nil
 	}
