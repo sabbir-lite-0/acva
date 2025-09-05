@@ -5,12 +5,12 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/sabbir-lite-0/acva/utils"
-	"github.com/sabbir-lite-0/acva/core/gemini"
 )
 
 type Fuzzer struct {
@@ -18,10 +18,10 @@ type Fuzzer struct {
 	config       utils.Config
 	client       *utils.HTTPClient
 	wordlist     []string
-	geminiClient *gemini.GeminiClient
+	geminiClient *GeminiClient
 }
 
-func NewFuzzer(logger *utils.Logger, config utils.Config, client *utils.HTTPClient, geminiClient *gemini.GeminiClient) *Fuzzer {
+func NewFuzzer(logger *utils.Logger, config utils.Config, client *utils.HTTPClient, geminiClient *GeminiClient) *Fuzzer {
 	fuzzer := &Fuzzer{
 		logger:       logger,
 		config:       config,
@@ -35,68 +35,9 @@ func NewFuzzer(logger *utils.Logger, config utils.Config, client *utils.HTTPClie
 	return fuzzer
 }
 
-func (f *Fuzzer) loadWordlists() {
-	var allWords []string
-	
-	// Load from configured wordlists
-	for _, wordlistFile := range f.config.Fuzzing.Wordlists {
-		if words, err := f.loadWordlist(wordlistFile); err == nil {
-			allWords = append(allWords, words...)
-			f.logger.Info("Loaded %d words from %s", len(words), wordlistFile)
-		} else {
-			f.logger.Warning("Failed to load wordlist %s: %v", wordlistFile, err)
-		}
-	}
-	
-	// Add built-in payloads
-	allWords = append(allWords, f.config.Fuzzing.Payloads...)
-	
-	// Use Gemini to generate advanced payloads if enabled
-	if f.geminiClient != nil && f.config.Gemini.Enabled {
-		f.logger.Info("Generating advanced payloads with Gemini AI...")
-		
-		// Generate payloads for different vulnerability types
-		vulnTypes := []string{"SQL Injection", "XSS", "Path Traversal", "Command Injection"}
-		
-		for _, vulnType := range vulnTypes {
-			payloads, err := f.geminiClient.GenerateAdvancedPayloads(vulnType, "Web application security testing")
-			if err != nil {
-				f.logger.Warning("Failed to generate %s payloads: %v", vulnType, err)
-				continue
-			}
-			
-			allWords = append(allWords, payloads...)
-			f.logger.Info("Generated %d %s payloads", len(payloads), vulnType)
-		}
-	}
-	
-	// Remove duplicates
-	f.wordlist = utils.RemoveDuplicates(allWords)
-	f.logger.Info("Total unique payloads: %d", len(f.wordlist))
-}
-
-func (f *Fuzzer) loadWordlist(filename string) ([]string, error) {
-	file, err := os.Open(filename)
-	if err != nil {
-		return nil, err
-	}
-	defer file.Close()
-
-	var words []string
-	scanner := bufio.NewScanner(file)
-	for scanner.Scan() {
-		word := strings.TrimSpace(scanner.Text())
-		if word != "" && !strings.HasPrefix(word, "#") {
-			words = append(words, word)
-		}
-	}
-
-	return words, scanner.Err()
-}
-
 func (f *Fuzzer) Fuzz(endpoints []string, progress *utils.ProgressTracker) ([]Vulnerability, error) {
 	var vulnerabilities []Vulnerability
-	f.logger.Info("Fuzzing %d endpoints with %d payloads", len(endpoints), len(f.wordlist))
+	f.logger.Info("Starting fuzzing with %d payloads across %d endpoints", len(f.wordlist), len(endpoints))
 	
 	// Create a worker pool for concurrent fuzzing
 	pool := utils.NewWorkerPool(f.config.Scan.ConcurrentRequests, f.config.Scan.Retries, 
@@ -147,10 +88,63 @@ func (f *Fuzzer) Fuzz(endpoints []string, progress *utils.ProgressTracker) ([]Vu
 	return vulnerabilities, nil
 }
 
-func (f *Fuzzer) generateFuzzedURLs(originalURL, payload string) []string {
+func (f *Fuzzer) loadWordlists() {
+	var allWords []string
+	
+	// Load from configured wordlists
+	for _, wordlistFile := range f.config.Fuzzing.Wordlists {
+		if words, err := f.loadWordlist(wordlistFile); err == nil {
+			allWords = append(allWords, words...)
+		}
+	}
+	
+	// Add built-in payloads
+	builtInPayloads := []string{
+		"'", "\"", "<script>alert(1)</script>", "${7*7}", "{{7*7}}",
+		"../../../etc/passwd", "<!--#exec cmd=\"id\"-->", "|id", ";id",
+		"`id`", "$(id)", "{{7*'7'}}", "<%= 7*7 %>", "#{7*7}",
+	}
+	
+	allWords = append(allWords, builtInPayloads...)
+	
+	// Add payloads from config
+	allWords = append(allWords, f.config.Fuzzing.Payloads...)
+	
+	// Remove duplicates
+	f.wordlist = f.removeDuplicates(allWords)
+	f.logger.Info("Loaded %d fuzzing payloads", len(f.wordlist))
+}
+
+func (f *Fuzzer) loadWordlist(filename string) ([]string, error) {
+	var words []string
+	
+	// Check if file exists
+	if _, err := os.Stat(filename); os.IsNotExist(err) {
+		f.logger.Warning("Wordlist file not found: %s", filename)
+		return words, err
+	}
+	
+	file, err := os.Open(filename)
+	if err != nil {
+		return words, err
+	}
+	defer file.Close()
+	
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		word := strings.TrimSpace(scanner.Text())
+		if word != "" && !strings.HasPrefix(word, "#") {
+			words = append(words, word)
+		}
+	}
+	
+	return words, scanner.Err()
+}
+
+func (f *Fuzzer) generateFuzzedURLs(endpoint, payload string) []string {
 	var fuzzedURLs []string
 	
-	parsed, err := url.Parse(originalURL)
+	parsed, err := url.Parse(endpoint)
 	if err != nil {
 		return fuzzedURLs
 	}
@@ -158,42 +152,29 @@ func (f *Fuzzer) generateFuzzedURLs(originalURL, payload string) []string {
 	// Fuzz query parameters
 	query := parsed.Query()
 	for param := range query {
-		// Manual clone of url.Values
-		fuzzedQuery := make(url.Values)
-		for k, v := range query {
-			fuzzedQuery[k] = v
-		}
+		fuzzedQuery := query.Clone()
 		fuzzedQuery.Set(param, payload)
 		parsed.RawQuery = fuzzedQuery.Encode()
 		fuzzedURLs = append(fuzzedURLs, parsed.String())
 	}
 	
-	// Add new parameter
-	newParamQuery := make(url.Values)
-	for k, v := range query {
-		newParamQuery[k] = v
-	}
-	newParamQuery.Set("fuZZ_"+payload, payload)
-	parsed.RawQuery = newParamQuery.Encode()
-	fuzzedURLs = append(fuzzedURLs, parsed.String())
-	
-	// Fuzz path
+	// Fuzz path segments
 	if strings.Contains(parsed.Path, "/") {
-		pathParts := strings.Split(parsed.Path, "/")
-		for i, part := range pathParts {
-			if part != "" {
-				originalPart := pathParts[i]
-				pathParts[i] = payload
-				parsed.Path = strings.Join(pathParts, "/")
+		pathSegments := strings.Split(parsed.Path, "/")
+		for i, segment := range pathSegments {
+			if segment != "" {
+				fuzzedPath := make([]string, len(pathSegments))
+				copy(fuzzedPath, pathSegments)
+				fuzzedPath[i] = payload
+				parsed.Path = strings.Join(fuzzedPath, "/")
 				fuzzedURLs = append(fuzzedURLs, parsed.String())
-				pathParts[i] = originalPart
 			}
 		}
 	}
 	
-	// Add payload to end of path
-	parsed.Path = parsed.Path + "/" + payload
-	fuzzedURLs = append(fuzzedURL極, parsed.String())
+	// Add payload as new parameter
+	parsed.RawQuery = parsed.Query().Encode() + "&test=" + url.QueryEscape(payload)
+	fuzzedURLs = append(fuzzedURLs, parsed.String())
 	
 	return fuzzedURLs
 }
@@ -201,35 +182,31 @@ func (f *Fuzzer) generateFuzzedURLs(originalURL, payload string) []string {
 func (f *Fuzzer) testPayload(urlStr, payload string) []Vulnerability {
 	var vulnerabilities []Vulnerability
 	
-	// Test for SQL injection
+	// Test for different vulnerability types
 	if f.config.Vulnerabilities.SQLInjection {
 		if vulns := f.testForSQLi(urlStr, payload); len(vulns) > 0 {
 			vulnerabilities = append(vulnerabilities, vulns...)
 		}
 	}
 	
-	// Test for XSS
 	if f.config.Vulnerabilities.XSS {
 		if vulns := f.testForXSS(urlStr, payload); len(vulns) > 0 {
 			vulnerabilities = append(vulnerabilities, vulns...)
 		}
 	}
 	
-	// Test for command injection
 	if f.config.Vulnerabilities.CommandInjection {
 		if vulns := f.testForCommandInjection(urlStr, payload); len(vulns) > 0 {
 			vulnerabilities = append(vulnerabilities, vulns...)
 		}
 	}
 	
-	// Test for path traversal
 	if f.config.Vulnerabilities.PathTraversal {
 		if vulns := f.testForPathTraversal(urlStr, payload); len(vulns) > 0 {
 			vulnerabilities = append(vulnerabilities, vulns...)
 		}
 	}
 	
-	// Test for SSRF
 	if f.config.Vulnerabilities.SSRF {
 		if vulns := f.testForSSRF(urlStr, payload); len(vulns) > 0 {
 			vulnerabilities = append(vulnerabilities, vulns...)
@@ -249,35 +226,25 @@ func (f *Fuzzer) testForSQLi(urlStr, payload string) []Vulnerability {
 	
 	// Check for SQL error messages in response
 	sqlErrors := []string{
-		"sql syntax", "syntax error", "mysql", "ora-", "postgresql",
-		"microsoft ole db", "odbc driver", "jdbc driver", 
+		"SQL syntax", "MySQL server", "ORA-01756", "PostgreSQL", "SQLite",
+		"Microsoft OLE DB", "ODBC Driver", "JDBC Driver", "syntax error",
 		"unclosed quotation mark", "quoted string not properly terminated",
 	}
 	
 	body := strings.ToLower(response)
 	for _, errorMsg := range sqlErrors {
-		if strings.Contains(body, errorMsg) {
+		if strings.Contains(body, strings.ToLower(errorMsg)) {
 			vuln := Vulnerability{
 				Type:        "SQL Injection",
 				URL:         urlStr,
 				Severity:    "High",
-				Description: "Potential SQL Injection vulnerability detected",
+				Description: "SQL Injection vulnerability detected based on error messages",
 				Payload:     payload,
 				CWE:         "CWE-89",
 				CVSS:        8.8,
 				Remediation: "Use parameterized queries/prepared statements and input validation",
 				References:  []string{"https://cheatsheetseries.owasp.org/cheatsheets/SQL_Injection_Prevention_Cheat_Sheet.html"},
 			}
-			
-			// AI confirmation if available
-			if f.geminiClient != nil {
-				confirmed, reason, err := f.geminiClient.AnalyzeResponse(response, payload, "SQL Injection")
-				if err == nil && confirmed {
-					vuln.Description = "AI-confirmed SQL Injection: " + reason
-					vuln.Evidence = response
-				}
-			}
-			
 			vulnerabilities = append(vulnerabilities, vuln)
 			break
 		}
@@ -294,7 +261,7 @@ func (f *Fuzzer) testForXSS(urlStr, payload string) []Vulnerability {
 		return vulnerabilities
 	}
 	
-	// Check if payload is reflected in response
+	// Check for reflected XSS
 	if strings.Contains(response, payload) {
 		// Check if payload was not properly encoded
 		if !strings.Contains(response, f.htmlEncode(payload)) {
@@ -309,16 +276,6 @@ func (f *Fuzzer) testForXSS(urlStr, payload string) []Vulnerability {
 				Remediation: "Implement proper output encoding and input validation",
 				References:  []string{"https://cheatsheetseries.owasp.org/cheatsheets/Cross_Site_Scripting_Prevention_Cheat_Sheet.html"},
 			}
-			
-			// AI confirmation if available
-			if f.geminiClient != nil {
-				confirmed, reason, err := f.geminiClient.AnalyzeResponse(response, payload, "XSS")
-				if err == nil && confirmed {
-					vuln.Description = "AI-confirmed XSS: " + reason
-					vuln.Evidence = response
-				}
-			}
-			
 			vulnerabilities = append(vulnerabilities, vuln)
 		}
 	}
@@ -354,16 +311,6 @@ func (f *Fuzzer) testForCommandInjection(urlStr, payload string) []Vulnerability
 				Remediation: "Use proper input validation and avoid passing user input to system commands",
 				References:  []string{"https://cheatsheetseries.owasp.org/cheatsheets/OS_Command_Injection_Defense_Cheat_Sheet.html"},
 			}
-			
-			// AI confirmation if available
-			if f.geminiClient != nil {
-				confirmed, reason, err := f.geminiClient.AnalyzeResponse(response, payload, "Command Injection")
-				if err == nil && confirmed {
-					vuln.Description = "AI-confirmed Command Injection: " + reason
-					vuln.Evidence = response
-				}
-			}
-			
 			vulnerabilities = append(vulnerabilities, vuln)
 			break
 		}
@@ -399,16 +346,6 @@ func (f *Fuzzer) testForPathTraversal(urlStr, payload string) []Vulnerability {
 				Remediation: "Implement proper input validation and avoid using user input in file paths",
 				References:  []string{"https://owasp.org/www-community/attacks/Path_Traversal"},
 			}
-			
-			// AI confirmation if available
-			if f.geminiClient != nil {
-				confirmed, reason, err := f.geminiClient.AnalyzeResponse(response, payload, "Path Traversal")
-				if err == nil && confirmed {
-					vuln.Description = "AI-confirmed Path Traversal: " + reason
-					vuln.Evidence = response
-				}
-			}
-			
 			vulnerabilities = append(vulnerabilities, vuln)
 			break
 		}
@@ -420,47 +357,13 @@ func (f *Fuzzer) testForPathTraversal(urlStr, payload string) []Vulnerability {
 func (f *Fuzzer) testForSSRF(urlStr, payload string) []Vulnerability {
 	var vulnerabilities []Vulnerability
 	
-	// SSRF testing requires special handling with callback server
-	// This is a simplified version
+	// SSRF testing would typically involve:
+	// 1. Testing for URL-based parameters that might trigger external requests
+	// 2. Checking if the server makes requests to internal resources
+	// 3. Testing for DNS rebinding attacks
 	
-	response, err := f.client.Get(urlStr)
-	if err != nil {
-		return vulnerabilities
-	}
-	
-	// Check for internal IP addresses or cloud metadata in response
-	internalPatterns := []string{
-		"192.168.", "10.", "172.16.", "127.0.0.1", "localhost",
-		"169.254.169.254", "metadata.google.internal",
-	}
-	
-	for _, pattern := range internalPatterns {
-		if strings.Contains(response, pattern) {
-			vuln := Vulnerability{
-				Type:        "SSRF",
-				URL:         urlStr,
-				Severity:    "High",
-				Description: "Server-Side Request Forgery vulnerability detected",
-				Payload:     payload,
-				CWE:         "CWE-918",
-				CVSS:        8.1,
-				Remediation: "Validate and sanitize all user input used in URL generation",
-				References:  []string{"https://cheatsheetseries.owasp.org/cheatsheets/Server_Side_Request_Forgery_Prevention_Cheat_Sheet.html"},
-			}
-			
-			// AI confirmation if available
-			if f.geminiClient != nil {
-				confirmed, reason, err := f.geminiClient.AnalyzeResponse(response, payload, "SSRF")
-				if err == nil && confirmed {
-					vuln.Description = "AI-confirmed SSRF: " + reason
-					vuln.Evidence = response
-				}
-			}
-			
-			vulnerabilities = append(vulnerabilities, vuln)
-			break
-		}
-	}
+	// This is a placeholder implementation
+	// In a real implementation, you would use a callback server to detect SSRF
 	
 	return vulnerabilities
 }
@@ -474,4 +377,18 @@ func (f *Fuzzer) htmlEncode(s string) string {
 		"'", "&#39;",
 		"&", "&amp;",
 	).Replace(s)
+}
+
+func (f *Fuzzer) removeDuplicates(slice []string) []string {
+	seen := make(map[string]bool)
+	result := []string{}
+	
+	for _, item := range slice {
+		if !seen[item] {
+			seen[item] = true
+			result = append(result, item)
+		}
+	}
+	
+	return result
 }
