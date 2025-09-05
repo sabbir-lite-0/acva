@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/sabbir-lite-0/acva/utils"
-	"github.com/sabbir-lite-0/acva/core/gemini"
 )
 
 type Scanner struct {
@@ -22,10 +21,10 @@ type Scanner struct {
 	jsEngine     *JSEngine
 	cluster      *ClusterManager
 	stopChan     chan struct{}
-	geminiClient *gemini.GeminiClient
+	geminiClient *GeminiClient
 }
 
-func NewScanner(logger *utils.Logger, config utils.Config, httpClient *utils.HTTPClient, geminiClient *gemini.GeminiClient) *Scanner {
+func NewScanner(logger *utils.Logger, config utils.Config, httpClient *utils.HTTPClient, geminiClient *GeminiClient) *Scanner {
 	return &Scanner{
 		logger:       logger,
 		config:       config,
@@ -99,7 +98,7 @@ func (s *Scanner) FuzzTarget(ctx context.Context, target string, progress *utils
 	}
 
 	elapsed := time.Since(startTime)
-	s.logger.Success("Fuzzing completed in %s. Found %极 vulnerabilities", elapsed, len(vulnerabilities))
+	s.logger.Success("Fuzzing completed in %s. Found %d vulnerabilities", elapsed, len(vulnerabilities))
 
 	return vulnerabilities, nil
 }
@@ -204,14 +203,14 @@ func (s *Scanner) SetResourceLimits() {
 	if err := syscall.Getrlimit(syscall.RLIMIT_AS, &memLimit); err == nil {
 		memLimit.Cur = memLimit.Max * 80 / 100
 		if err := syscall.Setrlimit(syscall.RLIMIT_AS, &memLimit); err == nil {
-			s.logger.Info("极 memory limit to %dMB", memLimit.Cur/1024/1024)
+			s.logger.Info("Set memory limit to %dMB", memLimit.Cur/1024/1024)
 		}
 	}
 }
 
 func (s *Scanner) MonitorPerformance() {
 	go func() {
-		ticker := time.New极(30 * time.Second)
+		ticker := time.NewTicker(30 * time.Second)
 		defer ticker.Stop()
 		
 		for {
@@ -233,7 +232,6 @@ func (s *Scanner) Stop() {
 	s.logger.Info("Scanner stopped gracefully")
 }
 
-// HealthCheck performs health check on scanner components
 func (s *Scanner) HealthCheck() map[string]bool {
 	health := make(map[string]bool)
 	
@@ -255,4 +253,14 @@ func (s *Scanner) HealthCheck() map[string]bool {
 	}
 	
 	return health
+}
+
+// ScanConfig represents scan configuration for distributed scanning
+type ScanConfig struct {
+	Target    string   `json:"target"`
+	Modules   []string `json:"modules"`
+	Depth     int      `json:"depth"`
+	Timeout   int      `json:"timeout"`
+	ScanID    string   `json:"scan_id"`
+	StartedAt string   `json:"started_at"`
 }
