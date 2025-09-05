@@ -27,14 +27,65 @@ fi
 
 echo -e "${GREEN}✓ Found Go $GO_VERSION${NC}"
 
-# Build the tool
+# Ensure we're in the right directory
+if [ ! -f "go.mod" ]; then
+    echo -e "${RED}Error: Must run install script from ACVA project root directory${NC}"
+    echo "Current directory: $(pwd)"
+    exit 1
+fi
+
+# Clean up any previous builds
+echo "Cleaning up previous builds..."
+rm -f acva
+
+# Download and verify dependencies
+echo "Downloading Go dependencies..."
+if go mod download; then
+    echo -e "${GREEN}✓ Dependencies downloaded successfully${NC}"
+else
+    echo -e "${YELLOW}⚠ Trying to fix dependencies with go mod tidy...${NC}"
+    go mod tidy
+    if ! go mod download; then
+        echo -e "${RED}✗ Failed to download dependencies${NC}"
+        exit 1
+    fi
+fi
+
+# Verify all dependencies are available
+echo "Verifying dependencies..."
+if go mod verify; then
+    echo -e "${GREEN}✓ Dependencies verified successfully${NC}"
+else
+    echo -e "${RED}✗ Dependency verification failed${NC}"
+    exit 1
+fi
+
+# Build the tool with more detailed output
 echo "Building ACVA..."
-if go build -ldflags="-s -w -X main.Version=2.0.0" -o acva cmd/acva/main.go; then
+if go build -v -ldflags="-s -w -X main.Version=2.0.0" -o acva cmd/acva/main.go; then
     chmod +x acva
     echo -e "${GREEN}✓ Build successful${NC}"
+    
+    # Test if the binary works
+    if ./acva --version &>/dev/null; then
+        echo -e "${GREEN}✓ Binary is functional${NC}"
+    else
+        echo -e "${YELLOW}⚠ Binary built but may have runtime issues${NC}"
+    fi
 else
     echo -e "${RED}✗ Build failed${NC}"
-    exit 1
+    echo "Trying alternative build approach..."
+    
+    # Try building with more verbose output
+    go build -x -ldflags="-s -w -X main.Version=2.0.0" -o acva cmd/acva/main.go 2>&1 | head -20
+    if [ -f "acva" ]; then
+        chmod +x acva
+        echo -e "${GREEN}✓ Build successful after alternative approach${NC}"
+    else
+        echo -e "${RED}✗ Build failed completely${NC}"
+        echo "Please check your Go environment and try again."
+        exit 1
+    fi
 fi
 
 # Install globally
@@ -165,6 +216,13 @@ echo -e "This will guide you through setting up your API keys securely"
 echo -e "\nTesting installation..."
 if command -v acva &> /dev/null; then
     echo -e "${GREEN}✓ ACVA is now available globally.${NC}"
+    
+    # Test version command
+    if acva --version &>/dev/null; then
+        echo -e "${GREEN}✓ ACVA is working correctly${NC}"
+    else
+        echo -e "${YELLOW}⚠ ACVA installed but may have issues running${NC}"
+    fi
 else
     echo -e "${RED}✗ Installation test failed${NC}"
     exit 1
