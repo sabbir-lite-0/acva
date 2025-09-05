@@ -134,7 +134,7 @@ func (j *JSEngine) AnalyzeSPA(url string) ([]Vulnerability, error) {
 	// Process results
 	allEndpoints := append(links, endpoints...)
 	analyzer := NewAnalyzer(j.logger, j.config, utils.NewHTTPClient(j.config.Scan.Timeout), nil)
-	pageVulns, err := analyzer.Analyze(allEndpoints, nil)
+	pageVulns, err := analyzer.Analyze(allEndpoints)
 	if err != nil {
 		j.logger.Error("Failed to analyze endpoints: %v", err)
 	} else {
