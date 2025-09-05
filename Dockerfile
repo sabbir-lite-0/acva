@@ -28,7 +28,9 @@ FROM alpine:3.18
 # Install necessary packages
 RUN apk add --no-cache \
     ca-certificates \
-    tzdata
+    tzdata \
+    chromium \
+    chromium-chromedriver
 
 # Create non-root user
 RUN adduser -D -u 1000 acva
