@@ -18,7 +18,7 @@ import (
 
 // ACVA Logo and version
 const (
-	Version = "1.0.0"
+	Version = "2.0.0"
 	Logo    = `
          _    ______     ___     
     / \  / ___\ \   / / \    
@@ -51,7 +51,7 @@ func main() {
 		Authors: []*cli.Author{
 			{
 				Name:  "DSAS",
-				Email: "test@example.com",
+				Email: "security@example.com",
 			},
 		},
 		Flags: []cli.Flag{
@@ -375,7 +375,7 @@ func runDaemonMode(c *cli.Context, logger *utils.Logger, config utils.Config, sc
 
 func checkForUpdates() error {
 	// Implementation for GitHub version checking
-	return utils.CheckGitHubUpdates("my-username", "acva", Version)
+	return utils.CheckGitHubUpdates("sabbir-lite-0", "acva", Version)
 }
 
 func showScanSummary(vulnerabilities []core.Vulnerability, logger *utils.Logger) {
