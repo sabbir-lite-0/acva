@@ -1,6 +1,7 @@
 package core
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
@@ -12,17 +13,16 @@ import (
 	"unicode/utf8"
 
 	"github.com/sabbir-lite-0/acva/utils"
-	"github.com/sabbir-lite-0/acva/core/gemini"
 )
 
 type Analyzer struct {
 	logger       *utils.Logger
 	config       utils.Config
 	client       *utils.HTTPClient
-	geminiClient *gemini.GeminiClient
+	geminiClient *GeminiClient
 }
 
-func NewAnalyzer(logger *utils.Logger, config utils.Config, client *utils.HTTPClient, geminiClient *gemini.GeminiClient) *Analyzer {
+func NewAnalyzer(logger *utils.Logger, config utils.Config, client *utils.HTTPClient, geminiClient *GeminiClient) *Analyzer {
 	return &Analyzer{
 		logger:       logger,
 		config:       config,
@@ -206,17 +206,17 @@ func (a *Analyzer) AdvancedAnalysis(endpoint, responseBody string) ([]Vulnerabil
 func (a *Analyzer) isPotentialSQLi(response string) bool {
 	// Advanced SQL error patterns
 	patterns := []string{
-		`(?i)(sql syntax.*error|syntax error.*sql)`,
-		`(?i)(mysql.*error|warning.*mysql)`,
-		`(?i)(ORA-[0-9]{5})`,
-		`(?i)(PostgreSQL.*ERROR)`,
-		`(?i)(Driver.*SQL[-\_ ]*Server)`,
-		`(?i)(Unclosed quotation mark)`,
-		`(?i)(quoted string not properly terminated)`,
+		`(sql syntax.*error|syntax error.*sql)`,
+		`(mysql.*error|warning.*mysql)`,
+		`(ORA-[0-9]{5})`,
+		`(PostgreSQL.*ERROR)`,
+		`(Driver.*SQL[-\_ ]*Server)`,
+		`(Unclosed quotation mark)`,
+		`(quoted string not properly terminated)`,
 	}
 	
 	for _, pattern := range patterns {
-		if matched, _ := regexp.MatchString(pattern, response); matched {
+		if matched, _ := regexp.MatchString(pattern, response, regexp.IgnoreCase); matched {
 			return true
 		}
 	}
@@ -226,17 +226,17 @@ func (a *Analyzer) isPotentialSQLi(response string) bool {
 func (a *Analyzer) isPotentialXSS(response string) bool {
 	// XSS patterns
 	patterns := []string{
-		`(?i)<script>`,
-		`(?i)javascript:`,
-		`(?i)onerror=`,
-		`(?i)onload=`,
-		`(?i)onclick=`,
-		`(?i)alert\(`,
-		`(?i)document\.cookie`,
+		`<script>`,
+		`javascript:`,
+		`onerror=`,
+		`onload=`,
+		`onclick=`,
+		`alert\(`,
+		`document\.cookie`,
 	}
 	
 	for _, pattern := range patterns {
-		if matched, _ := regexp.MatchString(pattern, response); matched {
+		if matched, _ := regexp.MatchString(pattern, response, regexp.IgnoreCase); matched {
 			return true
 		}
 	}
@@ -246,15 +246,15 @@ func (a *Analyzer) isPotentialXSS(response string) bool {
 func (a *Analyzer) isPotentialCommandInjection(response string) bool {
 	// Command injection patterns
 	patterns := []string{
-		`(?i)(bin/bash|bin/sh)`,
-		`(?i)(cmd\.exe|command\.com)`,
-		`(?i)(whoami|id|ls|dir)`,
-		`(?i)(root|administrator)`,
-		`(?i)(nt authority|linux|windows)`,
+		`(bin/bash|bin/sh)`,
+		`(cmd\.exe|command\.com)`,
+		`(whoami|id|ls|dir)`,
+		`(root|administrator)`,
+		`(nt authority|linux|windows)`,
 	}
 	
 	for _, pattern := range patterns {
-		if matched, _ := regexp.MatchString(pattern, response); matched {
+		if matched, _ := regexp.MatchString(pattern, response, regexp.IgnoreCase); matched {
 			return true
 		}
 	}
