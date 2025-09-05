@@ -64,7 +64,7 @@ type Config struct {
 		Timeout          int    `yaml:"timeout"`
 		Headless         bool   `yaml:"headless"`
 		UserAgent        string `yaml:"user_agent"`
-		WaitFor          int   `yaml:"wait_for"`
+		WaitFor          int    `yaml:"wait_for"`
 		ViewportWidth    int    `yaml:"viewport_width"`
 		ViewportHeight   int    `yaml:"viewport_height"`
 		ExecuteScripts   bool   `yaml:"execute_scripts"`
